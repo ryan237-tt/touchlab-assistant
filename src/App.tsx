@@ -4,6 +4,8 @@ import Screen02VersuchAuswaehlen from "./components/Screen02VersuchAuswaehlen";
 import Screen03Anleitung from "./components/Screen03Anleitung";
 import Screen04GesteErkannt from "./components/Screen04GesteErkannt";
 import Screen05Sprachnotiz from "./components/Screen05Sprachnotiz";
+import Screen07Bestaetigung from "./components/Screen07Bestaetigung";
+
 /**
  * Alle möglichen Screens unserer App.
  *
@@ -55,8 +57,9 @@ function App() {
         {current === "03" && <Screen03Anleitung onNavigate={navigate} />}
         {current === "04" && <Screen04GesteErkannt onNavigate={navigate} />}
         {current === "05" && <Screen05Sprachnotiz onNavigate={navigate} />}
+        {current === "07" && <Screen07Bestaetigung onNavigate={navigate} />}
 
-        {current !== "01" && current !== "02" && current !== "03" && current !== "04" && current !== "05" && (
+        {current !== "01" && current !== "02" && current !== "03" && current !== "04" && current !== "05" && current !== "07" && (
           <div className="flex min-h-[932px] items-center justify-center p-6 text-center">
             <div>
               <p className="text-sm text-[#667085]">Screen {current}</p>
