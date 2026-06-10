@@ -2,192 +2,349 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  Camera,
   CheckCircle2,
   ChevronLeft,
-  RefreshCcw,
+  Loader2,
+  RotateCcw,
 } from "lucide-react";
 import { motion } from "motion/react";
+import {
+  FaceLandmarker,
+  FilesetResolver,
+  type NormalizedLandmark,
+} from "@mediapipe/tasks-vision";
 
 /**
  * Props für Screen 04.
  *
  * onNavigate kommt aus App.tsx.
- * Damit können wir:
- * - zurück zu Screen 03 gehen
- * - nach erfolgreicher Geste wieder zur Anleitung navigieren
+ * Damit gehen wir nach erfolgreicher Geste zurück zur Anleitung.
  */
 type Screen04GesteErkanntProps = {
   onNavigate: (screen: string) => void;
 };
 
 /**
- * Mögliche Zustände dieses Screens.
- *
- * waiting:
- *   Die App wartet auf eine Bewegung.
- *
- * detected:
- *   Eine Geste wurde erkannt und Feedback wird angezeigt.
+ * Status der Kamera / Erkennung.
  */
-type GestureState = "waiting" | "detected";
+type CameraState = "loading" | "ready" | "error";
 
 /**
- * Mögliche Gestenrichtungen.
+ * Richtung der erkannten Kopfbewegung.
  *
- * RIGHT bedeutet: weiter
- * LEFT bedeutet: zurück
- * NONE bedeutet: noch keine Geste erkannt
+ * LEFT: Kopf nach links
+ * CENTER: Kopf neutral
+ * RIGHT: Kopf nach rechts
+ * NO_FACE: kein Gesicht erkannt
  */
-type GestureDirection = "LEFT" | "RIGHT" | "NONE";
+type HeadDirection = "LEFT" | "CENTER" | "RIGHT" | "NO_FACE";
 
 /**
- * Screen 04: Geste erkannt
+ * Screen 04: echte Kopfbewegungserkennung mit MediaPipe.
  *
- * Ziel:
- * Dieser Screen simuliert eine echte Gestenerkennung.
+ * HCI-Ziel:
+ * Der Nutzer soll durch eine Laboranleitung navigieren,
+ * ohne das Smartphone zu berühren.
  *
- * Warum erstmal Maus/Touch/Pfeiltasten?
- * - Funktioniert sofort auf PC und Smartphone.
- * - Zeigt schon die Interaktionslogik.
- * - Später können wir die Erkennung durch MediaPipe ersetzen.
- *
- * HCI-Idee:
- * Die App gibt sichtbares Feedback, bevor sie weiterleitet.
- * Dadurch fühlt sich die Interaktion kontrollierbarer und sicherer an.
+ * Wichtig:
+ * Eine Aktion wird erst ausgelöst, wenn die Kopfbewegung
+ * kurz gehalten wird. Das verhindert Fehlbedienung durch
+ * natürliche Bewegungen.
  */
 export default function Screen04GesteErkannt({
   onNavigate,
 }: Screen04GesteErkanntProps) {
-  const [state, setState] = useState<GestureState>("waiting");
-  const [direction, setDirection] = useState<GestureDirection>("NONE");
-  const [countdown, setCountdown] = useState(3);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const landmarkerRef = useRef<FaceLandmarker | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
 
   /**
-   * Wir speichern die letzte X-Position der Maus oder des Fingers.
-   * So können wir berechnen:
-   * Hat sich der Nutzer schnell nach rechts oder links bewegt?
+   * Diese Refs speichern technische Werte,
+   * ohne das UI bei jedem Videoframe neu zu rendern.
    */
-  const lastXRef = useRef<number | null>(null);
+  const lastVideoTimeRef = useRef(-1);
+  const holdStartRef = useRef<number | null>(null);
+  const lastDirectionRef = useRef<HeadDirection>("CENTER");
+  const cooldownUntilRef = useRef(0);
+
+  const [cameraState, setCameraState] = useState<CameraState>("loading");
+  const [direction, setDirection] = useState<HeadDirection>("NO_FACE");
+  const [feedback, setFeedback] = useState("Kamera wird gestartet...");
+  const [gestureConfirmed, setGestureConfirmed] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   /**
-   * Schwellenwert für eine Geste.
-   *
-   * Wenn sich Maus/Finger um mehr als 80 Pixel bewegt,
-   * zählen wir das als bewusste Geste.
-   *
-   * Warum 80?
-   * Kleine Bewegungen sollen nicht direkt eine Aktion auslösen.
-   */
-  const gestureThreshold = 80;
-
-  /**
-   * Wenn eine Geste erkannt wurde, startet ein Countdown.
-   * Nach 3 Sekunden geht es automatisch zurück zur Anleitung.
+   * Beim Laden des Screens:
+   * 1. MediaPipe Face Landmarker laden
+   * 2. Kamera starten
+   * 3. Video-Loop starten
    */
   useEffect(() => {
-    if (state !== "detected") return;
+    let active = true;
 
-    setCountdown(3);
+    async function initFaceTracking() {
+      try {
+        setCameraState("loading");
+        setFeedback("MediaPipe wird geladen...");
 
-    const interval = window.setInterval(() => {
-      setCountdown((current) => {
-        if (current <= 1) {
-          window.clearInterval(interval);
-          onNavigate("03");
-          return 0;
+        /**
+         * FilesetResolver lädt die WebAssembly-Dateien,
+         * die MediaPipe im Browser benötigt.
+         */
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+        );
+
+        /**
+         * FaceLandmarker ist das Modell zur Gesichtspunkt-Erkennung.
+         *
+         * runningMode VIDEO ist wichtig, weil wir Live-Video analysieren.
+         */
+        const faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task",
+            delegate: "GPU",
+          },
+          runningMode: "VIDEO",
+          numFaces: 1,
+        });
+
+        if (!active) {
+          faceLandmarker.close();
+          return;
         }
 
-        return current - 1;
-      });
-    }, 1000);
+        landmarkerRef.current = faceLandmarker;
 
-    return () => window.clearInterval(interval);
-  }, [state, onNavigate]);
+        setFeedback("Kamera wird geöffnet...");
 
-  /**
-   * Tastatursteuerung:
-   * Pfeil rechts = Geste nach rechts
-   * Pfeil links = Geste nach links
-   *
-   * Das ist gut für Demos am Laptop.
-   */
-  useEffect(() => {
-    function handleKeyDown(event: KeyboardEvent) {
-      if (state !== "waiting") return;
+        /**
+         * facingMode user:
+         * Auf Smartphone wird möglichst die Frontkamera genutzt.
+         */
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "user",
+            width: { ideal: 640 },
+            height: { ideal: 480 },
+          },
+          audio: false,
+        });
 
-      if (event.key === "ArrowRight") {
-        detectGesture("RIGHT");
-      }
+        if (!videoRef.current) return;
 
-      if (event.key === "ArrowLeft") {
-        detectGesture("LEFT");
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+
+        setCameraState("ready");
+        setFeedback("Bereit: Kopf nach links oder rechts bewegen.");
+
+        startPredictionLoop();
+      } catch (error) {
+        console.error(error);
+        setCameraState("error");
+        setErrorMessage(
+          "Kamera oder MediaPipe konnte nicht gestartet werden. Bitte Chrome/Edge nutzen und Kamera erlauben."
+        );
+        setFeedback("Fehler beim Starten der Kamera.");
       }
     }
 
-    window.addEventListener("keydown", handleKeyDown);
+    initFaceTracking();
 
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [state]);
+    /**
+     * Cleanup:
+     * Wenn der Screen verlassen wird, stoppen wir Kamera,
+     * Animation Frame und MediaPipe.
+     */
+    return () => {
+      active = false;
+
+      if (animationFrameRef.current !== null) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+
+      landmarkerRef.current?.close();
+
+      const video = videoRef.current;
+      const stream = video?.srcObject;
+
+      if (stream instanceof MediaStream) {
+        stream.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
 
   /**
-   * Mausbewegung erkennen.
-   *
-   * Wir vergleichen aktuelle X-Position mit der letzten X-Position.
-   * Positive Differenz = Bewegung nach rechts.
-   * Negative Differenz = Bewegung nach links.
+   * Prediction Loop:
+   * Diese Funktion läuft pro Animation Frame
+   * und analysiert das aktuelle Videobild.
    */
-  function handlePointerMove(clientX: number) {
-    if (state !== "waiting") return;
+  function startPredictionLoop() {
+    function predict() {
+      detectHeadDirection();
+      animationFrameRef.current = requestAnimationFrame(predict);
+    }
 
-    if (lastXRef.current === null) {
-      lastXRef.current = clientX;
+    predict();
+  }
+
+  /**
+   * Kernfunktion:
+   * 1. Videobild analysieren
+   * 2. Gesichtspunkte lesen
+   * 3. Kopf-Richtung bestimmen
+   * 4. Haltezeit prüfen
+   */
+  function detectHeadDirection() {
+    const video = videoRef.current;
+    const landmarker = landmarkerRef.current;
+
+    if (!video || !landmarker || video.readyState < 2) return;
+
+    /**
+     * Nur analysieren, wenn ein neues Videobild vorhanden ist.
+     * Das spart Leistung.
+     */
+    if (video.currentTime === lastVideoTimeRef.current) return;
+    lastVideoTimeRef.current = video.currentTime;
+
+    const result = landmarker.detectForVideo(video, performance.now());
+
+    if (!result.faceLandmarks || result.faceLandmarks.length === 0) {
+      updateDirection("NO_FACE");
       return;
     }
 
-    const deltaX = clientX - lastXRef.current;
+    const landmarks = result.faceLandmarks[0];
 
-    if (deltaX > gestureThreshold) {
-      detectGesture("RIGHT");
-    } else if (deltaX < -gestureThreshold) {
-      detectGesture("LEFT");
+    const newDirection = estimateHeadDirection(landmarks);
+    updateDirection(newDirection);
+  }
+
+  /**
+   * Schätzt, ob der Kopf nach links/rechts zeigt.
+   *
+   * Wir nutzen drei Landmarken:
+   * - 1: Nase
+   * - 33: linker Augenbereich
+   * - 263: rechter Augenbereich
+   *
+   * Idee:
+   * Wenn sich die Nase relativ zur Augenmitte verschiebt,
+   * interpretieren wir das als Kopfbewegung.
+   *
+   * Hinweis:
+   * Wegen gespiegelt angezeigter Frontkamera kann links/rechts
+   * je nach Gerät invertiert wirken. Für den Prototyp ist das
+   * okay und kann später kalibriert werden.
+   */
+  function estimateHeadDirection(landmarks: NormalizedLandmark[]): HeadDirection {
+    const nose = landmarks[1];
+    const leftEye = landmarks[33];
+    const rightEye = landmarks[263];
+
+    if (!nose || !leftEye || !rightEye) return "NO_FACE";
+
+    const faceCenterX = (leftEye.x + rightEye.x) / 2;
+    const offset = nose.x - faceCenterX;
+
+    /**
+     * Schwellenwert:
+     * Kleine natürliche Kopfbewegungen sollen nicht auslösen.
+     *
+     * Wenn es zu empfindlich ist: threshold erhöhen, z. B. 0.045.
+     * Wenn es zu schwer auslöst: threshold senken, z. B. 0.025.
+     */
+    const threshold = 0.035;
+
+    if (offset > threshold) return "RIGHT";
+    if (offset < -threshold) return "LEFT";
+    return "CENTER";
+  }
+
+  /**
+   * Interaktionslogik.
+   *
+   * Eine Richtung wird nicht sofort als Aktion gezählt.
+   * Der Nutzer muss sie ca. 700 ms halten.
+   */
+  function updateDirection(newDirection: HeadDirection) {
+    const now = Date.now();
+
+    setDirection(newDirection);
+
+    if (gestureConfirmed) return;
+
+    if (newDirection === "NO_FACE") {
+      setFeedback("Kein Gesicht erkannt.");
+      holdStartRef.current = null;
+      lastDirectionRef.current = "NO_FACE";
+      return;
+    }
+
+    if (newDirection === "CENTER") {
+      setFeedback("Kopf in der Mitte.");
+      holdStartRef.current = null;
+      lastDirectionRef.current = "CENTER";
+      return;
+    }
+
+    if (cooldownUntilRef.current > now) {
+      setFeedback("Kurze Pause, um Mehrfachauslösung zu vermeiden.");
+      return;
+    }
+
+    /**
+     * Wenn eine neue Richtung beginnt,
+     * startet die Haltezeit neu.
+     */
+    if (lastDirectionRef.current !== newDirection) {
+      lastDirectionRef.current = newDirection;
+      holdStartRef.current = now;
+
+      setFeedback(
+        newDirection === "RIGHT"
+          ? "Kopf rechts erkannt – kurz halten..."
+          : "Kopf links erkannt – kurz halten..."
+      );
+
+      return;
+    }
+
+    const holdTime = holdStartRef.current ? now - holdStartRef.current : 0;
+
+    if (holdTime >= 700) {
+      setGestureConfirmed(true);
+      cooldownUntilRef.current = now + 1200;
+      holdStartRef.current = null;
+
+      setFeedback(
+        newDirection === "RIGHT"
+          ? "Geste bestätigt: Weiter."
+          : "Geste bestätigt: Zurück."
+      );
     }
   }
 
   /**
-   * Wird aufgerufen, wenn eine Geste erkannt wurde.
-   */
-  function detectGesture(newDirection: GestureDirection) {
-    setDirection(newDirection);
-    setState("detected");
-  }
-
-  /**
-   * Reset-Funktion:
-   * Nutzer kann die Geste nochmal testen.
+   * Zurücksetzen, damit man die Geste nochmal testen kann.
    */
   function resetGesture() {
-    setState("waiting");
-    setDirection("NONE");
-    setCountdown(3);
-    lastXRef.current = null;
+    setGestureConfirmed(false);
+    setFeedback("Bereit: Kopf nach links oder rechts bewegen.");
+    setDirection("CENTER");
+    holdStartRef.current = null;
+    lastDirectionRef.current = "CENTER";
+    cooldownUntilRef.current = Date.now() + 500;
   }
 
-  const directionLabel =
-    direction === "RIGHT"
-      ? "Kopf rechts → Weiter"
-      : direction === "LEFT"
-        ? "Kopf links → Zurück"
-        : "Keine Geste";
+  const directionLabel = getDirectionLabel(direction);
 
   return (
-    <section
-      className="min-h-[932px] bg-[#F7F9FC] px-6 py-10"
-      onMouseMove={(event) => handlePointerMove(event.clientX)}
-      onTouchMove={(event) => {
-        const touch = event.touches[0];
-        if (touch) handlePointerMove(touch.clientX);
-      }}
-    >
+    <section className="min-h-[932px] bg-[#F7F9FC] px-6 py-10">
       {/* Header */}
       <header className="flex items-start gap-4">
         <button
@@ -200,199 +357,175 @@ export default function Screen04GesteErkannt({
 
         <div>
           <h1 className="text-[22px] font-bold leading-tight text-[#101828]">
-            Geste testen
+            Kopfbewegung testen
           </h1>
 
           <p className="mt-2 text-[15px] leading-[22px] text-[#475467]">
-            Bewege den Kopf nach rechts oder links. Im Prototyp funktioniert es
-            mit Maus, Finger oder Pfeiltasten.
+            Navigiere durch die Laboranleitung mit einer echten Kopfbewegung.
           </p>
         </div>
       </header>
 
-      {state === "waiting" && (
-        <WaitingState
-          onPointerStart={(x) => {
-            lastXRef.current = x;
-          }}
-        />
-      )}
+      {/* Kamera */}
+      <motion.div
+        initial={{ opacity: 0, y: 18 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35 }}
+        className="mt-8 overflow-hidden rounded-3xl border border-[#EAECF0] bg-black shadow-sm"
+      >
+        <div className="relative">
+          <video
+            ref={videoRef}
+            muted
+            playsInline
+            autoPlay
+            className="h-[260px] w-full object-cover scale-x-[-1]"
+          />
 
-      {state === "detected" && (
-        <DetectedState
-          directionLabel={directionLabel}
-          direction={direction}
-          countdown={countdown}
-          onReset={resetGesture}
-          onContinue={() => onNavigate("03")}
-        />
+          {cameraState === "loading" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 text-white">
+              <Loader2 className="animate-spin" size={36} />
+              <p className="mt-3 text-[14px]">Kamera wird geladen...</p>
+            </div>
+          )}
+
+          {cameraState === "error" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 p-6 text-center text-white">
+              <Camera size={36} />
+              <p className="mt-3 text-[14px] leading-5">{errorMessage}</p>
+            </div>
+          )}
+        </div>
+      </motion.div>
+
+      {/* Status */}
+      <div className="mt-6 rounded-3xl border border-[#EAECF0] bg-white p-5 shadow-sm">
+        <p className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#667085]">
+          Live Status
+        </p>
+
+        <p className="mt-3 text-[16px] font-bold text-[#101828]">{feedback}</p>
+
+        <div className="mt-4 flex items-center justify-between rounded-2xl bg-[#F9FAFB] p-4">
+          <div>
+            <p className="text-[12px] text-[#667085]">Erkannte Richtung</p>
+            <p className="mt-1 font-mono text-[15px] font-bold text-[#101828]">
+              {directionLabel}
+            </p>
+          </div>
+
+          <DirectionIcon direction={direction} />
+        </div>
+      </div>
+
+      {/* Ergebnis / Aktion */}
+      {gestureConfirmed ? (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.96, y: 18 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+          className="mt-7 rounded-3xl border border-[#A7F3D0] bg-[#ECFDF5] p-5 text-center shadow-sm"
+        >
+          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#D1FAE5] text-[#059669]">
+            <CheckCircle2 size={38} />
+          </div>
+
+          <h2 className="mt-4 text-[20px] font-bold text-[#101828]">
+            Kopfbewegung erkannt
+          </h2>
+
+          <p className="mt-2 text-[14px] leading-5 text-[#047857]">
+            Die Aktion wurde erst nach kurzer Haltezeit bestätigt. Das reduziert
+            Fehlbedienungen durch natürliche Kopfbewegungen.
+          </p>
+
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <button
+              onClick={resetGesture}
+              className="flex h-[52px] items-center justify-center gap-2 rounded-2xl bg-[#E8F0FE] text-[14px] font-bold text-[#1D4ED8] transition active:scale-[0.99]"
+            >
+              <RotateCcw size={18} />
+              Nochmal
+            </button>
+
+            <button
+              onClick={() => onNavigate("03")}
+              className="h-[52px] rounded-2xl bg-[#1D4ED8] text-[14px] font-bold text-white shadow-sm transition active:scale-[0.99]"
+            >
+              Zur Anleitung
+            </button>
+          </div>
+        </motion.div>
+      ) : (
+        <div className="mt-7 grid grid-cols-2 gap-3">
+          <InstructionCard
+            icon={<ArrowLeft size={22} />}
+            title="Kopf links"
+            text="zurück"
+          />
+
+          <InstructionCard
+            icon={<ArrowRight size={22} />}
+            title="Kopf rechts"
+            text="weiter"
+          />
+        </div>
       )}
     </section>
   );
 }
 
 /**
- * Wartender Zustand:
- * Die App wartet auf eine Geste.
+ * Label für den UI-Status.
  */
-function WaitingState({
-  onPointerStart,
-}: {
-  onPointerStart: (x: number) => void;
-}) {
+function getDirectionLabel(direction: HeadDirection) {
+  if (direction === "LEFT") return "KOPF LINKS";
+  if (direction === "RIGHT") return "KOPF RECHTS";
+  if (direction === "CENTER") return "MITTE";
+  return "KEIN GESICHT";
+}
+
+/**
+ * Kleines Status-Icon je nach Richtung.
+ */
+function DirectionIcon({ direction }: { direction: HeadDirection }) {
+  if (direction === "LEFT") {
+    return <ArrowLeft size={28} className="text-[#1D4ED8]" />;
+  }
+
+  if (direction === "RIGHT") {
+    return <ArrowRight size={28} className="text-[#1D4ED8]" />;
+  }
+
+  if (direction === "NO_FACE") {
+    return <Camera size={28} className="text-[#98A2B3]" />;
+  }
+
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 18 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-      className="mt-10"
-    >
-      {/* Tracking-Box */}
-      <div
-        className="rounded-3xl border-2 border-dashed border-[#93C5FD] bg-[#EEF4FF] p-5"
-        onMouseDown={(event) => onPointerStart(event.clientX)}
-        onTouchStart={(event) => {
-          const touch = event.touches[0];
-          if (touch) onPointerStart(touch.clientX);
-        }}
-      >
-        <div className="flex h-28 items-center justify-center">
-          <motion.div
-            animate={{ x: [-80, 80, -80] }}
-            transition={{
-              duration: 2,
-              repeat: Infinity,
-              ease: "easeInOut",
-            }}
-            className="flex h-14 w-14 items-center justify-center rounded-full bg-[#1D4ED8] text-white shadow-lg"
-          >
-            <ArrowRight size={26} />
-          </motion.div>
-        </div>
-
-        <p className="text-center text-[14px] font-semibold text-[#1D4ED8]">
-          Maus/Finger schnell nach rechts oder links bewegen
-        </p>
-
-        <p className="mt-2 text-center text-[12px] leading-5 text-[#667085]">
-          Alternative: Pfeiltasten ← oder → drücken
-        </p>
-      </div>
-
-      {/* Erklärungskarte */}
-      <div className="mt-8 rounded-3xl border border-[#EAECF0] bg-white p-5 shadow-sm">
-        <h2 className="text-[18px] font-bold text-[#101828]">
-          Interaktionslogik
-        </h2>
-
-        <p className="mt-2 text-[14px] leading-5 text-[#667085]">
-          Eine Kopfbewegung soll nicht versehentlich ausgelöst werden. Deshalb
-          braucht der Prototyp eine klare Bewegung und zeigt danach sichtbares
-          Feedback.
-        </p>
-
-        <div className="mt-5 grid grid-cols-2 gap-3">
-          <div className="rounded-2xl bg-[#F9FAFB] p-4 text-center">
-            <ArrowLeft className="mx-auto text-[#1D4ED8]" size={24} />
-            <p className="mt-2 text-[13px] font-bold text-[#101828]">
-              Links
-            </p>
-            <p className="text-[12px] text-[#667085]">Zurück</p>
-          </div>
-
-          <div className="rounded-2xl bg-[#F9FAFB] p-4 text-center">
-            <ArrowRight className="mx-auto text-[#1D4ED8]" size={24} />
-            <p className="mt-2 text-[13px] font-bold text-[#101828]">
-              Rechts
-            </p>
-            <p className="text-[12px] text-[#667085]">Weiter</p>
-          </div>
-        </div>
-      </div>
-    </motion.div>
+    <div className="h-7 w-7 rounded-full border-4 border-[#1D4ED8] bg-white" />
   );
 }
 
 /**
- * Erkannter Zustand:
- * Die App bestätigt die erkannte Geste.
+ * Kleine Karte für Erklärung links/rechts.
  */
-function DetectedState({
-  directionLabel,
-  direction,
-  countdown,
-  onReset,
-  onContinue,
+function InstructionCard({
+  icon,
+  title,
+  text,
 }: {
-  directionLabel: string;
-  direction: GestureDirection;
-  countdown: number;
-  onReset: () => void;
-  onContinue: () => void;
+  icon: React.ReactNode;
+  title: string;
+  text: string;
 }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.96, y: 18 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-      className="mt-16 text-center"
-    >
-      <motion.div
-        initial={{ scale: 0.7 }}
-        animate={{ scale: 1 }}
-        transition={{ type: "spring", stiffness: 220, damping: 14 }}
-        className="mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-[#D1FAE5] text-[#059669]"
-      >
-        <CheckCircle2 size={54} />
-      </motion.div>
-
-      <h2 className="mt-8 text-[22px] font-bold text-[#101828]">
-        Kopfbewegung erkannt
-      </h2>
-
-      <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-[#EEF4FF] px-4 py-2 text-[14px] font-bold text-[#1D4ED8]">
-        {direction === "RIGHT" ? (
-          <ArrowRight size={18} />
-        ) : (
-          <ArrowLeft size={18} />
-        )}
-        {directionLabel}
+    <div className="rounded-3xl border border-[#EAECF0] bg-white p-5 text-center shadow-sm">
+      <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#EEF4FF] text-[#1D4ED8]">
+        {icon}
       </div>
 
-      <p className="mt-5 text-[15px] leading-[22px] text-[#475467]">
-        Die App hat die Bewegung erkannt und bestätigt die Aktion visuell.
-      </p>
-
-      <div className="mt-8 rounded-3xl border border-[#A7F3D0] bg-[#ECFDF5] p-5">
-        <p className="text-[13px] font-semibold text-[#047857]">
-          Automatische Weiterleitung
-        </p>
-
-        <p className="mt-2 text-[42px] font-bold tabular-nums text-[#059669]">
-          {countdown}
-        </p>
-
-        <p className="text-[12px] text-[#047857]">
-          Danach wird die Anleitung wieder geöffnet.
-        </p>
-      </div>
-
-      <div className="mt-8 grid grid-cols-2 gap-3">
-        <button
-          onClick={onReset}
-          className="flex h-[52px] items-center justify-center gap-2 rounded-2xl bg-[#E8F0FE] text-[14px] font-bold text-[#1D4ED8] transition hover:bg-[#DCEBFF] active:scale-[0.99]"
-        >
-          <RefreshCcw size={18} />
-          Nochmal
-        </button>
-
-        <button
-          onClick={onContinue}
-          className="h-[52px] rounded-2xl bg-[#1D4ED8] text-[14px] font-bold text-white shadow-sm transition hover:brightness-95 active:scale-[0.99]"
-        >
-          Weiter
-        </button>
-      </div>
-    </motion.div>
+      <p className="mt-3 text-[15px] font-bold text-[#101828]">{title}</p>
+      <p className="mt-1 text-[13px] text-[#667085]">{text}</p>
+    </div>
   );
 }
