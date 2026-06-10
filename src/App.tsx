@@ -6,7 +6,7 @@ import Screen04GesteErkannt from "./components/Screen04GesteErkannt";
 import Screen05Sprachnotiz from "./components/Screen05Sprachnotiz";
 import Screen07Bestaetigung from "./components/Screen07Bestaetigung";
 import Screen06Sicherheitsinfo from "./components/Screen06Sicherheitsinfo";
-
+import ScreenTimer from "./components/ScreenTimer";
 
 /**
  * Alle möglichen Screens unserer App.
@@ -61,8 +61,9 @@ function App() {
         {current === "05" && <Screen05Sprachnotiz onNavigate={navigate} />}
         {current === "06" && <Screen06Sicherheitsinfo onNavigate={navigate} />}
         {current === "07" && <Screen07Bestaetigung onNavigate={navigate} />}
+        {current === "timer" && <ScreenTimer onNavigate={navigate} />}
 
-        {current !== "01" && current !== "02" && current !== "03" && current !== "04" && current !== "05" && current !== "06" && current !== "07" && (
+        {current !== "01" && current !== "02" && current !== "03" && current !== "04" && current !== "05" && current !== "06" && current !== "07" && current !== "timer" && (
           <div className="flex min-h-[932px] items-center justify-center p-6 text-center">
             <div>
               <p className="text-sm text-[#667085]">Screen {current}</p>
