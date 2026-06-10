@@ -1,3 +1,5 @@
+import InteractionModeBanner from "./InteractionModeBanner";
+
 import { useEffect, useRef, useState } from "react";
 import {
   CheckCircle2,
@@ -265,6 +267,8 @@ export default function Screen05Sprachnotiz({
           </p>
         </div>
       </header>
+
+      <InteractionModeBanner mode="voice" />
 
       {/* Hauptbereich Mikrofon */}
       <div className="mt-12 flex flex-col items-center text-center">

@@ -1,3 +1,5 @@
+import InteractionModeBanner from "./InteractionModeBanner";
+
 import { useMemo, useState } from "react";
 import {
   AlertTriangle,
@@ -158,6 +160,8 @@ export default function Screen06Sicherheitsinfo({
           </p>
         </div>
       </header>
+
+      <InteractionModeBanner mode="safety" />
 
       {/* Suchfeld */}
       <div className="mt-8">

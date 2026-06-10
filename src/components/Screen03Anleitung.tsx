@@ -1,3 +1,6 @@
+import InteractionModeBanner from "./InteractionModeBanner";
+
+
 import {
   ChevronLeft,
   ChevronRight,
@@ -81,6 +84,8 @@ export default function Screen03Anleitung({
           </p>
         </div>
       </header>
+
+      <InteractionModeBanner mode="navigation" />
 
       {/* Fortschrittsbalken */}
       <div className="mt-8">

@@ -1,6 +1,8 @@
+import InteractionModeBanner from "./InteractionModeBanner";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, Pause, Play, RotateCcw, Timer } from "lucide-react";
 import { motion } from "motion/react";
+
 
 /**
  * Props für den Timer-Screen.
@@ -183,6 +185,8 @@ export default function ScreenTimer({ onNavigate }: ScreenTimerProps) {
           </p>
         </div>
       </header>
+
+      <InteractionModeBanner mode="timer" />
 
       {/* Preset-Auswahl */}
       <div className="mt-8 grid grid-cols-4 gap-2">

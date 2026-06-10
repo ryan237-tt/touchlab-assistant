@@ -1,3 +1,5 @@
+import InteractionModeBanner from "./InteractionModeBanner";
+
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -147,11 +149,32 @@ export default function Screen04GesteErkannt({
   const lastDirectionRef = useRef<HeadDirection>("CENTER");
   const cooldownUntilRef = useRef(0);
 
+  /**
+   * latestOffsetRef speichert den aktuellen Kopf-Offset.
+   *
+   * Offset bedeutet:
+   * Wie weit ist die Nase relativ zur Gesichtsmitte verschoben?
+   */
+  const latestOffsetRef = useRef(0);
+
+  /**
+   * neutralOffsetRef speichert die kalibrierte Mittelposition.
+   *
+   * Wenn der Nutzer geradeaus schaut und kalibriert,
+   * speichern wir diesen Wert als "neutral".
+   */
+  const neutralOffsetRef = useRef(0);
+
   const [cameraState, setCameraState] = useState<CameraState>("loading");
   const [direction, setDirection] = useState<HeadDirection>("NO_FACE");
   const [feedback, setFeedback] = useState("Kamera wird gestartet...");
   const [gestureConfirmed, setGestureConfirmed] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+
+  /**
+   * Gibt an, ob der Nutzer bereits kalibriert hat.
+   */
+  const [calibrated, setCalibrated] = useState(false);
 
   /**
    * Standard ist Avatar-Modus.
@@ -234,7 +257,7 @@ export default function Screen04GesteErkannt({
         await videoRef.current.play();
 
         setCameraState("ready");
-        setFeedback("Bereit: Kopf nach links oder rechts bewegen.");
+        setFeedback("Bereit: Bitte zuerst geradeaus kalibrieren.");
 
         startPredictionLoop();
       } catch (error) {
@@ -327,9 +350,11 @@ export default function Screen04GesteErkannt({
    * - 33: linker Augenbereich
    * - 263: rechter Augenbereich
    *
-   * Idee:
-   * Wenn sich die Nase relativ zur Augenmitte verschiebt,
-   * interpretieren wir das als Kopfbewegung.
+   * Neu:
+   * Wir berücksichtigen eine Kalibrierung.
+   * Das heißt:
+   * Nicht absolute Kopfposition zählt, sondern Abweichung
+   * von der persönlichen Neutralposition.
    */
   function estimateHeadDirection(
     landmarks: NormalizedLandmark[]
@@ -341,7 +366,25 @@ export default function Screen04GesteErkannt({
     if (!nose || !leftEye || !rightEye) return "NO_FACE";
 
     const faceCenterX = (leftEye.x + rightEye.x) / 2;
-    const offset = nose.x - faceCenterX;
+
+    /**
+     * rawOffset ist der aktuelle technische Kopf-Offset.
+     */
+    const rawOffset = nose.x - faceCenterX;
+
+    /**
+     * Wir speichern den aktuellen Offset,
+     * damit der Kalibrierungsbutton ihn nutzen kann.
+     */
+    latestOffsetRef.current = rawOffset;
+
+    /**
+     * adjustedOffset ist der Offset relativ zur kalibrierten Mitte.
+     *
+     * Ohne Kalibrierung ist neutralOffsetRef.current = 0.
+     * Mit Kalibrierung wird die persönliche Kopfmitte abgezogen.
+     */
+    const adjustedOffset = rawOffset - neutralOffsetRef.current;
 
     /**
      * Schwellenwert:
@@ -357,8 +400,8 @@ export default function Screen04GesteErkannt({
      * Das Video ist gespiegelt, damit es sich für Nutzer natürlich anfühlt.
      * Deshalb tauschen wir LEFT/RIGHT hier bewusst.
      */
-    if (offset > threshold) return "LEFT";
-    if (offset < -threshold) return "RIGHT";
+    if (adjustedOffset > threshold) return "LEFT";
+    if (adjustedOffset < -threshold) return "RIGHT";
 
     return "CENTER";
   }
@@ -384,9 +427,20 @@ export default function Screen04GesteErkannt({
     }
 
     if (newDirection === "CENTER") {
-      setFeedback("Kopf in der Mitte.");
+      setFeedback(
+        calibrated
+          ? "Kopf in der Mitte."
+          : "Kopf in der Mitte. Bitte geradeaus kalibrieren."
+      );
       holdStartRef.current = null;
       lastDirectionRef.current = "CENTER";
+      return;
+    }
+
+    if (!calibrated) {
+      setFeedback("Bitte zuerst geradeaus kalibrieren.");
+      holdStartRef.current = null;
+      lastDirectionRef.current = newDirection;
       return;
     }
 
@@ -439,6 +493,27 @@ export default function Screen04GesteErkannt({
     cooldownUntilRef.current = Date.now() + 500;
   }
 
+  /**
+   * Kalibriert die neutrale Kopfposition.
+   *
+   * Nutzer soll geradeaus schauen und dann klicken.
+   * Der aktuelle Offset wird als neue Mitte gespeichert.
+   */
+  function calibrateNeutralPosition() {
+    neutralOffsetRef.current = latestOffsetRef.current;
+    setCalibrated(true);
+
+    setGestureConfirmed(false);
+    setDirection("CENTER");
+    holdStartRef.current = null;
+    lastDirectionRef.current = "CENTER";
+    cooldownUntilRef.current = Date.now() + 800;
+
+    setFeedback(
+      "Kalibrierung gespeichert. Kopfbewegung kann jetzt getestet werden."
+    );
+  }
+
   const directionLabel = getDirectionLabel(direction);
 
   return (
@@ -463,6 +538,8 @@ export default function Screen04GesteErkannt({
           </p>
         </div>
       </header>
+
+      <InteractionModeBanner mode="navigation" />
 
       {/* Anzeige-Modus wählen */}
       <div className="mt-8 grid grid-cols-2 gap-3">
@@ -603,6 +680,50 @@ export default function Screen04GesteErkannt({
           )}
         </div>
       </motion.div>
+
+      {/* Kalibrierung */}
+      <div className="mt-6 rounded-3xl border border-[#EAECF0] bg-white p-5 shadow-sm">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#667085]">
+              Kalibrierung
+            </p>
+
+            <h2 className="mt-2 text-[17px] font-bold text-[#101828]">
+              Geradeaus als Mitte speichern
+            </h2>
+
+            <p className="mt-2 text-[13px] leading-5 text-[#667085]">
+              Schau gerade in die Kamera und speichere diese Position als
+              neutrale Kopfhaltung.
+            </p>
+          </div>
+
+          <span
+            className={[
+              "shrink-0 rounded-full px-3 py-1 text-[11px] font-bold",
+              calibrated
+                ? "bg-[#D1FAE5] text-[#059669]"
+                : "bg-[#FFFAEB] text-[#DC6803]",
+            ].join(" ")}
+          >
+            {calibrated ? "kalibriert" : "offen"}
+          </span>
+        </div>
+
+        <button
+          onClick={calibrateNeutralPosition}
+          disabled={cameraState !== "ready" || direction === "NO_FACE"}
+          className={[
+            "mt-5 h-[52px] w-full rounded-2xl text-[15px] font-bold transition active:scale-[0.99]",
+            cameraState === "ready" && direction !== "NO_FACE"
+              ? "bg-[#1D4ED8] text-white"
+              : "bg-[#F2F4F7] text-[#98A2B3]",
+          ].join(" ")}
+        >
+          Geradeaus kalibrieren
+        </button>
+      </div>
 
       {/* Status */}
       <div className="mt-6 rounded-3xl border border-[#EAECF0] bg-white p-5 shadow-sm">
