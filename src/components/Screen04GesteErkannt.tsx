@@ -7,6 +7,8 @@ import {
   ChevronLeft,
   Loader2,
   RotateCcw,
+  Sparkles,
+  UserRound,
 } from "lucide-react";
 import { motion } from "motion/react";
 import {
@@ -41,6 +43,76 @@ type CameraState = "loading" | "ready" | "error";
 type HeadDirection = "LEFT" | "CENTER" | "RIGHT" | "NO_FACE";
 
 /**
+ * Anzeige-Modus:
+ *
+ * camera:
+ * Der Nutzer sieht sein echtes Kamerabild.
+ *
+ * avatar:
+ * Die Kamera läuft im Hintergrund für die Erkennung,
+ * aber visuell wird ein neutraler Avatar angezeigt.
+ */
+type DisplayMode = "camera" | "avatar";
+
+/**
+ * Datenstruktur für einen Avatar.
+ *
+ * Wichtig:
+ * Diese Avatare sind anime-inspiriert, aber original.
+ * Wir nutzen keine echten geschützten Figuren oder Bilder.
+ */
+type AvatarOption = {
+  id: string;
+  name: string;
+  role: string;
+  emoji: string;
+  gradient: string;
+};
+
+/**
+ * Originale anime-inspirierte Avatar-Profile.
+ *
+ * Sie erinnern nur an Archetypen, kopieren aber keine echten Charaktere.
+ */
+const avatarOptions: AvatarOption[] = [
+  {
+    id: "energy-fighter",
+    name: "Kiro",
+    role: "Energy Fighter",
+    emoji: "⚡",
+    gradient: "from-yellow-400 to-orange-500",
+  },
+  {
+    id: "explorer-captain",
+    name: "Maro",
+    role: "Explorer Captain",
+    emoji: "🏴‍☠️",
+    gradient: "from-red-500 to-yellow-400",
+  },
+  {
+    id: "blade-guardian",
+    name: "Riku",
+    role: "Blade Guardian",
+    emoji: "⚔️",
+    gradient: "from-orange-500 to-rose-500",
+  },
+  {
+    id: "strategic-analyst",
+    name: "Lian",
+    role: "Strategic Analyst",
+    emoji: "📓",
+    gradient: "from-slate-800 to-gray-500",
+  },
+  {
+    id: "lab-engineer",
+    name: "Nami",
+    role: "Lab Engineer",
+    emoji: "🔬",
+    gradient: "from-cyan-400 to-blue-500",
+  },
+];
+
+/**
  * Screen 04: echte Kopfbewegungserkennung mit MediaPipe.
  *
  * HCI-Ziel:
@@ -48,9 +120,16 @@ type HeadDirection = "LEFT" | "CENTER" | "RIGHT" | "NO_FACE";
  * ohne das Smartphone zu berühren.
  *
  * Wichtig:
- * Eine Aktion wird erst ausgelöst, wenn die Kopfbewegung
- * kurz gehalten wird. Das verhindert Fehlbedienung durch
- * natürliche Bewegungen.
+ * Eine Aktion wird erst ausgelöst, wenn die Kopfbewegung kurz gehalten wird.
+ * Das verhindert Fehlbedienung durch natürliche Bewegungen.
+ *
+ * Zusätzliche HCI-Idee:
+ * Der Nutzer kann wählen:
+ * - eigenes Kamerabild anzeigen
+ * - Avatar-Modus anzeigen
+ *
+ * Im Avatar-Modus läuft die Kamera trotzdem im Hintergrund,
+ * aber das echte Gesicht wird nicht sichtbar angezeigt.
  */
 export default function Screen04GesteErkannt({
   onNavigate,
@@ -73,6 +152,21 @@ export default function Screen04GesteErkannt({
   const [feedback, setFeedback] = useState("Kamera wird gestartet...");
   const [gestureConfirmed, setGestureConfirmed] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+
+  /**
+   * Standard ist Avatar-Modus.
+   *
+   * Vorteil:
+   * Nutzer müssen ihr echtes Gesicht nicht dauerhaft sehen.
+   * Das verbessert Komfort und Privatsphäre.
+   */
+  const [displayMode, setDisplayMode] = useState<DisplayMode>("avatar");
+  const [selectedAvatarId, setSelectedAvatarId] =
+    useState("energy-fighter");
+
+  const selectedAvatar =
+    avatarOptions.find((avatar) => avatar.id === selectedAvatarId) ||
+    avatarOptions[0];
 
   /**
    * Beim Laden des Screens:
@@ -99,7 +193,8 @@ export default function Screen04GesteErkannt({
         /**
          * FaceLandmarker ist das Modell zur Gesichtspunkt-Erkennung.
          *
-         * runningMode VIDEO ist wichtig, weil wir Live-Video analysieren.
+         * runningMode VIDEO ist wichtig,
+         * weil wir Live-Video analysieren.
          */
         const faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
           baseOptions: {
@@ -219,8 +314,8 @@ export default function Screen04GesteErkannt({
     }
 
     const landmarks = result.faceLandmarks[0];
-
     const newDirection = estimateHeadDirection(landmarks);
+
     updateDirection(newDirection);
   }
 
@@ -235,13 +330,10 @@ export default function Screen04GesteErkannt({
    * Idee:
    * Wenn sich die Nase relativ zur Augenmitte verschiebt,
    * interpretieren wir das als Kopfbewegung.
-   *
-   * Hinweis:
-   * Wegen gespiegelt angezeigter Frontkamera kann links/rechts
-   * je nach Gerät invertiert wirken. Für den Prototyp ist das
-   * okay und kann später kalibriert werden.
    */
-  function estimateHeadDirection(landmarks: NormalizedLandmark[]): HeadDirection {
+  function estimateHeadDirection(
+    landmarks: NormalizedLandmark[]
+  ): HeadDirection {
     const nose = landmarks[1];
     const leftEye = landmarks[33];
     const rightEye = landmarks[263];
@@ -260,8 +352,14 @@ export default function Screen04GesteErkannt({
      */
     const threshold = 0.035;
 
-    if (offset > threshold) return "RIGHT";
-    if (offset < -threshold) return "LEFT";
+    /**
+     * Wichtig:
+     * Das Video ist gespiegelt, damit es sich für Nutzer natürlich anfühlt.
+     * Deshalb tauschen wir LEFT/RIGHT hier bewusst.
+     */
+    if (offset > threshold) return "LEFT";
+    if (offset < -threshold) return "RIGHT";
+
     return "CENTER";
   }
 
@@ -366,21 +464,129 @@ export default function Screen04GesteErkannt({
         </div>
       </header>
 
-      {/* Kamera */}
+      {/* Anzeige-Modus wählen */}
+      <div className="mt-8 grid grid-cols-2 gap-3">
+        <button
+          onClick={() => setDisplayMode("avatar")}
+          className={[
+            "flex h-11 items-center justify-center gap-2 rounded-2xl text-[13px] font-bold transition active:scale-[0.99]",
+            displayMode === "avatar"
+              ? "bg-[#1D4ED8] text-white"
+              : "bg-[#E8F0FE] text-[#1D4ED8]",
+          ].join(" ")}
+        >
+          <Sparkles size={16} />
+          Avatar
+        </button>
+
+        <button
+          onClick={() => setDisplayMode("camera")}
+          className={[
+            "flex h-11 items-center justify-center gap-2 rounded-2xl text-[13px] font-bold transition active:scale-[0.99]",
+            displayMode === "camera"
+              ? "bg-[#1D4ED8] text-white"
+              : "bg-[#E8F0FE] text-[#1D4ED8]",
+          ].join(" ")}
+        >
+          <UserRound size={16} />
+          Eigener Kopf
+        </button>
+      </div>
+
+      {/* Avatar-Auswahl */}
+      {displayMode === "avatar" && (
+        <div className="mt-4 flex gap-2 overflow-x-auto pb-2">
+          {avatarOptions.map((avatar) => {
+            const active = avatar.id === selectedAvatarId;
+
+            return (
+              <button
+                key={avatar.id}
+                onClick={() => setSelectedAvatarId(avatar.id)}
+                className={[
+                  "min-w-[78px] rounded-2xl border p-2 text-center transition active:scale-[0.98]",
+                  active
+                    ? "border-[#1D4ED8] bg-[#EEF4FF]"
+                    : "border-[#EAECF0] bg-white",
+                ].join(" ")}
+              >
+                <div
+                  className={[
+                    "mx-auto flex h-11 w-11 items-center justify-center rounded-full bg-gradient-to-br text-xl text-white",
+                    avatar.gradient,
+                  ].join(" ")}
+                >
+                  {avatar.emoji}
+                </div>
+
+                <p className="mt-1 text-[11px] font-bold text-[#101828]">
+                  {avatar.name}
+                </p>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Kamera oder Avatar-Anzeige */}
       <motion.div
         initial={{ opacity: 0, y: 18 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35 }}
-        className="mt-8 overflow-hidden rounded-3xl border border-[#EAECF0] bg-black shadow-sm"
+        className="mt-5 overflow-hidden rounded-3xl border border-[#EAECF0] bg-black shadow-sm"
       >
-        <div className="relative">
+        <div className="relative h-[260px]">
+          {/*
+            Wichtig:
+            Das Video bleibt immer im DOM und aktiv,
+            weil MediaPipe das Video für die Kopf-Erkennung braucht.
+
+            Im Avatar-Modus wird das Video nur unsichtbar gemacht.
+            Es wird NICHT entfernt.
+          */}
           <video
             ref={videoRef}
             muted
             playsInline
             autoPlay
-            className="h-[260px] w-full object-cover scale-x-[-1]"
+            className={[
+              "absolute inset-0 h-full w-full object-cover scale-x-[-1]",
+              displayMode === "camera" ? "opacity-100" : "opacity-0",
+            ].join(" ")}
           />
+
+          {displayMode === "avatar" && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#101828] p-6 text-center text-white">
+              <motion.div
+                animate={
+                  direction === "LEFT"
+                    ? { x: [-8, -24, -8], rotate: [-2, -8, -2] }
+                    : direction === "RIGHT"
+                      ? { x: [8, 24, 8], rotate: [2, 8, 2] }
+                      : { x: 0, rotate: 0 }
+                }
+                transition={{ duration: 0.45 }}
+                className={[
+                  "flex h-28 w-28 items-center justify-center rounded-full bg-gradient-to-br text-5xl shadow-2xl",
+                  selectedAvatar.gradient,
+                ].join(" ")}
+              >
+                {selectedAvatar.emoji}
+              </motion.div>
+
+              <h2 className="mt-5 text-[22px] font-bold">
+                {selectedAvatar.name}
+              </h2>
+
+              <p className="mt-1 text-[14px] text-white/70">
+                {selectedAvatar.role}
+              </p>
+
+              <p className="mt-4 rounded-full bg-white/10 px-4 py-2 text-[12px] font-semibold text-white/80">
+                Kamera läuft im Hintergrund für Kopfbewegung
+              </p>
+            </div>
+          )}
 
           {cameraState === "loading" && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 text-white">
@@ -404,7 +610,9 @@ export default function Screen04GesteErkannt({
           Live Status
         </p>
 
-        <p className="mt-3 text-[16px] font-bold text-[#101828]">{feedback}</p>
+        <p className="mt-3 text-[16px] font-bold text-[#101828]">
+          {feedback}
+        </p>
 
         <div className="mt-4 flex items-center justify-between rounded-2xl bg-[#F9FAFB] p-4">
           <div>
