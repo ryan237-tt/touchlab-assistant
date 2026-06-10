@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Screen01Startscreen from "./components/Screen01Startscreen";
 import Screen02VersuchAuswaehlen from "./components/Screen02VersuchAuswaehlen";
+import Screen03Anleitung from "./components/Screen03Anleitung";
 
 /**
  * Alle möglichen Screens unserer App.
@@ -50,8 +51,9 @@ function App() {
       <div className="w-full max-w-[430px] min-h-[932px] overflow-hidden rounded-[32px] bg-[#F7F9FC] shadow-2xl">
         {current === "01" && <Screen01Startscreen onNavigate={navigate} />}
         {current === "02" && <Screen02VersuchAuswaehlen onNavigate={navigate} />}
+        {current === "03" && <Screen03Anleitung onNavigate={navigate} />}
 
-        {current !== "01" && current !== "02" && (
+        {current !== "01" && current !== "02" && current !== "03" && (
           <div className="flex min-h-[932px] items-center justify-center p-6 text-center">
             <div>
               <p className="text-sm text-[#667085]">Screen {current}</p>
