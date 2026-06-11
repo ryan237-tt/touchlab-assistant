@@ -1,73 +1,138 @@
-# React + TypeScript + Vite
+# TouchLab Assistant
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+TouchLab Assistant ist ein HCI-/MMI-Prototyp für eine touchfreie Labor-App.  
+Die App unterstützt Studierende während eines Laborversuchs durch Anleitung, Notizen, Timer und Sicherheitsinformationen.
 
-Currently, two official plugins are available:
+Der Fokus liegt auf der Interaktion in Situationen, in denen ein Smartphone nicht direkt berührt werden sollte, zum Beispiel wegen Handschuhen, Chemikalien oder Kontamination.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Projektkontext
 
-## React Compiler
+Dieses Projekt entstand im Rahmen des Moduls Mensch-Maschine-Interaktion.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Ziel war es, eine interaktive Anwendung zu entwickeln, die ein reales Nutzungsproblem adressiert:
 
-## Expanding the ESLint configuration
+> Wie können Studierende im Labor digitale Informationen nutzen, ohne ihr Smartphone mit kontaminierten Handschuhen berühren zu müssen?
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+## Kernidee
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+TouchLab Assistant kombiniert mehrere Interaktionsformen:
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+- Kopfbewegung zur Navigation
+- Sprach-/Audioaufnahme für Beobachtungsnotizen
+- Timer für zeitkritische Laborschritte
+- Sicherheitsinformationen zu Stoffen
+- Bestätigungsschutz für kritische Aktionen
+- Tastatur-Shortcuts als stabiler Demo- und Fallback-Modus
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+Die App ist als funktionaler Prototyp umgesetzt und demonstriert die wichtigsten HCI-Interaktionen.
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Funktionen
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+### Laboranleitung
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+Die App führt Nutzer durch einzelne Versuchsschritte.  
+Die Darstellung ist bewusst reduziert gestaltet, damit Informationen im Labor schnell erfassbar bleiben.
+
+### Kopfsteuerung
+
+Die App enthält eine kamerabasierte Kopfbewegungserkennung mit MediaPipe.
+
+Beispiele:
+
+- Kopf nach rechts: weiter
+- Kopf nach links: zurück
+- Kalibrierung der neutralen Kopfposition
+- visuelles Feedback zur erkannten Richtung
+
+Die Kopfsteuerung zeigt, wie eine touchfreie Navigation im Labor umgesetzt werden kann.
+
+### Sprachnotiz / Audioaufnahme
+
+Studierende können Beobachtungen als Audio aufnehmen.  
+Zusätzlich gibt es ein optionales Live-Transkript, falls der Browser dies unterstützt.
+
+Da Browser-Spracherkennung je nach Gerät, Netzwerk und Browser unzuverlässig sein kann, ist die Audioaufnahme der zuverlässige Primärkanal. Das Textfeld dient als Korrektur- und Fallback-Möglichkeit.
+
+### Sicherheitsinformationen
+
+Die App stellt wichtige Sicherheitsinformationen zu Laborstoffen bereit, zum Beispiel:
+
+- Ethanol
+- Salzsäure
+- Natronlauge
+
+Die Informationen sind prototypisch integriert und dienen der Demonstration des Interaktionskonzepts.
+
+### Timer
+
+Ein integrierter Timer unterstützt zeitkritische Laboraufgaben.  
+Der Timer kann gestartet, pausiert und zurückgesetzt werden.
+
+### Bestätigungsschutz
+
+Kritische Aktionen, zum Beispiel das Speichern einer Notiz, werden nicht sofort ausgeführt.  
+Stattdessen gibt es eine zusätzliche Bestätigung, um Fehlbedienungen zu vermeiden.
+
+## Demo-Shortcuts
+
+Für eine stabile Präsentation enthält der Prototyp Tastatur-Shortcuts.  
+Diese dienen als Demo- und Fallback-Steuerung, insbesondere weil Browser-Spracherkennung nicht immer zuverlässig ist.
+
+| Taste | Aktion |
+|---|---|
+| H | Startseite |
+| V | Versuchsauswahl |
+| A | Anleitung |
+| W | Weiter |
+| N | Notiz |
+| S | Sicherheitsinfos |
+| T | Timer |
+| Escape | Zurück |
+
+Diese Shortcuts können als Wizard-of-Oz- bzw. Fallback-Mechanismus verstanden werden. Die HCI-Interaktionslogik bleibt dabei erhalten.
+
+## HCI-Designentscheidungen
+
+### Touchfreie Interaktion als Primärkonzept
+
+Die App ist für Situationen gedacht, in denen Touch-Eingaben problematisch sind.  
+Buttons bleiben sichtbar, dienen aber als Fallback für Prototyping, Sicherheit und Testbarkeit.
+
+### Feedback und Fehlertoleranz
+
+Jede alternative Eingabeform benötigt klares Feedback.  
+Deshalb zeigt die App an, ob Kopfbewegung, Audioaufnahme oder Demo-Steuerung aktiv sind.
+
+### Kalibrierung
+
+Da Nutzer unterschiedlich vor der Kamera sitzen, wird eine neutrale Kopfposition kalibriert.  
+Dadurch wird die Erkennung robuster und persönlicher.
+
+### Fallback statt Abbruch
+
+Wenn automatische Transkription nicht verfügbar ist, bleibt die Audioaufnahme erhalten.  
+Wenn Sprache nicht zuverlässig erkannt wird, können Shortcuts oder Buttons genutzt werden.
+
+### Privatsphäre
+
+Der Prototyp enthält einen Avatar-Modus für die Kopfsteuerung.  
+Die Kamera kann im Hintergrund zur Bewegungserkennung genutzt werden, ohne dauerhaft das echte Gesicht im Interface zu zeigen.
+
+## Technologie
+
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- Motion
+- Lucide React
+- MediaPipe Tasks Vision
+- Web APIs:
+  - MediaDevices
+  - MediaRecorder
+  - Web Speech API, optional
+
+## Installation
+
+```bash
+npm install
