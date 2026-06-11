@@ -479,7 +479,7 @@ export default function GlobalTouchFreeDock({
         <span className="rounded-xl bg-[#F7F9FC] px-2 py-1">N Notiz</span>
         <span className="rounded-xl bg-[#F7F9FC] px-2 py-1">W Weiter</span>
         <span className="rounded-xl bg-[#F7F9FC] px-2 py-1">T Timer</span>
-        <span className="rounded-xl bg-[#F7F9FC] px-2 py-1">S Safety</span>
+        <span className="rounded-xl bg-[#F7F9FC] px-2 py-1">S Sicherheit</span>
       </div>
     </div>
   );

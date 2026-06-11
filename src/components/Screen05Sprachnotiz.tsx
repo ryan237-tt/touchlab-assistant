@@ -4,19 +4,16 @@ import { useEffect, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronLeft,
+  Edit3,
   Mic,
   MicOff,
   RefreshCcw,
   Save,
+  Square,
   X,
 } from "lucide-react";
 import { motion } from "motion/react";
 
-/**
- * TypeScript kennt die Web Speech API nicht immer vollständig.
- * Deshalb definieren wir hier kleine eigene Typen,
- * damit unser Code sauber und verständlich bleibt.
- */
 type SpeechRecognitionLike = {
   lang: string;
   continuous: boolean;
@@ -40,6 +37,7 @@ type SpeechRecognitionLike = {
   onend: (() => void) | null;
   onerror: ((event: { error: string }) => void) | null;
 };
+
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
 declare global {
@@ -49,204 +47,281 @@ declare global {
   }
 }
 
-/**
- * Props für Screen 05.
- *
- * onNavigate kommt aus App.tsx.
- * Damit kann Screen 05:
- * - zurück zur Anleitung gehen
- * - nach "Speichern" zur Bestätigung wechseln
- */
 type Screen05SprachnotizProps = {
   onNavigate: (screen: string) => void;
 };
 
-/**
- * Zustand der Aufnahme.
- *
- * idle:
- *   Noch keine Aufnahme aktiv.
- *
- * recording:
- *   Mikrofon/Speech Recognition läuft.
- *
- * done:
- *   Es wurde Text erkannt.
- *
- * unsupported:
- *   Browser unterstützt Speech Recognition nicht.
- */
 type RecordingState = "idle" | "recording" | "done" | "unsupported";
 
-/**
- * Screen 05: Sprachnotiz
- *
- * HCI-Ziel:
- * Im Labor soll der Nutzer Beobachtungen dokumentieren können,
- * ohne das Gerät mit Handschuhen zu berühren.
- *
- * Sicherheits-/Fehlerschutz:
- * Die App speichert nicht automatisch.
- * Erst wird der erkannte Text angezeigt, danach muss der Nutzer speichern
- * und anschließend in Screen 07 bestätigen.
- */
 export default function Screen05Sprachnotiz({
   onNavigate,
 }: Screen05SprachnotizProps) {
   const [state, setState] = useState<RecordingState>("idle");
-  const [recognizedText, setRecognizedText] = useState("");
+  const [noteText, setNoteText] = useState("");
   const [interimText, setInterimText] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [transcriptStatus, setTranscriptStatus] = useState(
+    "Live-Transkript noch nicht gestartet."
+  );
+  const [audioUrl, setAudioUrl] = useState("");
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
 
-  /**
-   * recognitionRef speichert die SpeechRecognition-Instanz.
-   *
-   * Warum useRef?
-   * Wir wollen die Instanz zwischen Funktionsaufrufen behalten,
-   * aber nicht bei jeder Änderung neu rendern.
-   */
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioChunksRef = useRef<BlobPart[]>([]);
+  const timerRef = useRef<number | null>(null);
 
-  /**
-   * Beim Laden des Screens prüfen wir:
-   * Unterstützt der Browser die Web Speech API?
-   *
-   * Chrome/Edge unterstützen meist webkitSpeechRecognition.
-   */
   useEffect(() => {
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      setState("unsupported");
+      setTranscriptStatus(
+        "Live-Transkript wird in diesem Browser nicht unterstützt. Audioaufnahme funktioniert trotzdem."
+      );
+    } else {
+      const recognition = new SpeechRecognition();
+
+      recognition.lang = "de-DE";
+      recognition.continuous = true;
+      recognition.interimResults = true;
+
+      recognition.onresult = (event) => {
+        let finalTranscript = "";
+        let interimTranscript = "";
+
+        for (let i = 0; i < event.results.length; i += 1) {
+          const transcript = event.results[i][0].transcript;
+
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript + " ";
+          } else {
+            interimTranscript += transcript + " ";
+          }
+        }
+
+        if (finalTranscript.trim()) {
+          setNoteText((previous) =>
+            `${previous} ${finalTranscript}`.trim()
+          );
+
+          setTranscriptStatus("Text erkannt und übernommen.");
+        }
+
+        if (interimTranscript.trim()) {
+          setTranscriptStatus("Live-Text wird erkannt...");
+        }
+
+        setInterimText(interimTranscript.trim());
+      };
+
+      recognition.onerror = (event) => {
+        setErrorMessage(
+          `Live-Transkript nicht zuverlässig: ${event.error}. Audioaufnahme läuft trotzdem.`
+        );
+
+        setTranscriptStatus(
+          "Live-Transkript hatte ein Problem. Audioaufnahme läuft trotzdem."
+        );
+      };
+
+      recognition.onend = () => {
+        setInterimText("");
+
+        if (state === "recording") {
+          setTranscriptStatus(
+            "Live-Transkript wurde beendet. Audioaufnahme läuft eventuell weiter."
+          );
+        }
+      };
+
+      recognitionRef.current = recognition;
+    }
+
+    return () => {
+      stopTimer();
+
+      try {
+        recognitionRef.current?.abort();
+      } catch {
+        // Speech Recognition war eventuell schon gestoppt.
+      }
+
+      stopMediaStream();
+
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function startRecording() {
+    setErrorMessage("");
+    setInterimText("");
+    setState("recording");
+    setRecordingSeconds(0);
+    setTranscriptStatus("Live-Transkript wird gestartet...");
+    audioChunksRef.current = [];
+
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+      setAudioUrl("");
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+        video: false,
+      });
+
+      streamRef.current = stream;
+
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: "audio/webm",
+        });
+
+        const url = URL.createObjectURL(audioBlob);
+        setAudioUrl(url);
+
+        stopMediaStream();
+        stopTimer();
+
+        setState("done");
+
+        if (!noteText.trim()) {
+          setTranscriptStatus(
+            "Audio wurde aufgenommen. Kein Text erkannt — du kannst den Text manuell eintragen."
+          );
+        }
+      };
+
+      mediaRecorder.start();
+      startTimer();
+
+      try {
+        recognitionRef.current?.start();
+        setTranscriptStatus(
+          "Live-Transkript aktiv. Sprich langsam und deutlich."
+        );
+      } catch {
+        setTranscriptStatus(
+          "Live-Transkript konnte nicht gestartet werden. Audioaufnahme läuft trotzdem."
+        );
+      }
+    } catch {
+      setState("idle");
+      setTranscriptStatus("Live-Transkript noch nicht gestartet.");
       setErrorMessage(
-        "Dein Browser unterstützt die Web Speech API nicht. Bitte nutze Chrome oder Edge."
+        "Mikrofon konnte nicht gestartet werden. Bitte Mikrofon im Browser erlauben."
+      );
+    }
+  }
+
+  function stopRecording() {
+    if (interimText.trim()) {
+      setNoteText((previous) =>
+        `${previous} ${interimText}`.trim()
+      );
+      setInterimText("");
+      setTranscriptStatus("Zwischentext wurde beim Stoppen übernommen.");
+    }
+
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      // Recognition war eventuell schon gestoppt.
+    }
+
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state !== "inactive"
+    ) {
+      mediaRecorderRef.current.stop();
+    } else {
+      stopMediaStream();
+      stopTimer();
+      setState(noteText.trim() ? "done" : "idle");
+    }
+  }
+
+  function resetRecording() {
+    try {
+      recognitionRef.current?.abort();
+    } catch {
+      // Recognition war eventuell schon gestoppt.
+    }
+
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state !== "inactive"
+    ) {
+      mediaRecorderRef.current.stop();
+    }
+
+    stopMediaStream();
+    stopTimer();
+
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+    }
+
+    audioChunksRef.current = [];
+    mediaRecorderRef.current = null;
+
+    setAudioUrl("");
+    setNoteText("");
+    setInterimText("");
+    setErrorMessage("");
+    setRecordingSeconds(0);
+    setTranscriptStatus("Live-Transkript noch nicht gestartet.");
+    setState("idle");
+  }
+
+  function saveNote() {
+    if (!noteText.trim() && !audioUrl) {
+      setErrorMessage(
+        "Bitte erst eine Audioaufnahme erstellen oder einen Notiztext eingeben."
       );
       return;
     }
 
-    const recognition = new SpeechRecognition();
-
-    recognition.lang = "de-DE";
-    recognition.continuous = true;
-    recognition.interimResults = true;
-
-    /**
-     * onresult wird immer aufgerufen, wenn Sprache erkannt wurde.
-     *
-     * finalTranscript:
-     *   sicher erkannter Text
-     *
-     * interimTranscript:
-     *   vorläufiger Text während des Sprechens
-     */
-    recognition.onresult = (event) => {
-      let finalTranscript = "";
-      let interimTranscript = "";
-
-      for (let i = 0; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-
-        if (event.results[i].isFinal) {
-          finalTranscript += transcript + " ";
-        } else {
-          interimTranscript += transcript;
-        }
-      }
-
-      setRecognizedText((previous) =>
-        (previous + " " + finalTranscript).trim()
-      );
-      setInterimText(interimTranscript);
-    };
-
-    /**
-     * Wenn die Aufnahme endet, wechseln wir in "done",
-     * falls Text erkannt wurde.
-     */
-    recognition.onend = () => {
-      setInterimText("");
-
-      setRecognizedText((currentText) => {
-        if (currentText.trim().length > 0) {
-          setState("done");
-        } else {
-          setState("idle");
-        }
-
-        return currentText;
-      });
-    };
-
-    recognition.onerror = (event) => {
-      setErrorMessage(`Fehler bei der Spracherkennung: ${event.error}`);
-      setState("idle");
-    };
-
-    recognitionRef.current = recognition;
-
-    /**
-     * Cleanup:
-     * Wenn der Screen verlassen wird, stoppen wir die Aufnahme.
-     */
-    return () => {
-      recognition.abort();
-    };
-  }, []);
-
-  /**
-   * Aufnahme starten.
-   */
-  function startRecording() {
-    if (!recognitionRef.current) return;
-
-    setErrorMessage("");
-    setInterimText("");
-    setState("recording");
-
-    try {
-      recognitionRef.current.start();
-    } catch {
-      /**
-       * start() kann fehlschlagen, wenn die Aufnahme bereits läuft.
-       */
-      setErrorMessage("Aufnahme konnte nicht gestartet werden.");
-      setState("idle");
-    }
-  }
-
-  /**
-   * Aufnahme stoppen.
-   */
-  function stopRecording() {
-    recognitionRef.current?.stop();
-  }
-
-  /**
-   * Text löschen und neu diktieren.
-   */
-  function resetRecording() {
-    recognitionRef.current?.abort();
-    setRecognizedText("");
-    setInterimText("");
-    setErrorMessage("");
-    setState("idle");
-  }
-
-  /**
-   * Speichern führt nicht direkt zur Speicherung.
-   * Stattdessen kommt Screen 07 als Bestätigungsschutz.
-   */
-  function saveNote() {
     onNavigate("07");
   }
 
-  const displayText =
-    recognizedText || interimText || "Noch kein Text erkannt.";
+  function startTimer() {
+    stopTimer();
+
+    timerRef.current = window.setInterval(() => {
+      setRecordingSeconds((seconds) => seconds + 1);
+    }, 1000);
+  }
+
+  function stopTimer() {
+    if (timerRef.current !== null) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }
+
+  function stopMediaStream() {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    streamRef.current = null;
+  }
 
   return (
     <section className="min-h-[932px] bg-[#F7F9FC] px-6 py-10">
-      {/* Header */}
       <header className="flex items-start gap-4">
         <button
           onClick={() => onNavigate("03")}
@@ -262,43 +337,38 @@ export default function Screen05Sprachnotiz({
           </h1>
 
           <p className="mt-2 text-[15px] leading-[22px] text-[#475467]">
-            Diktiere eine Beobachtung, ohne das Smartphone im Labor berühren zu
-            müssen.
+            Audio wird zuverlässig aufgenommen. Das Live-Transkript ist ein
+            zusätzlicher Komfort.
           </p>
         </div>
       </header>
 
       <InteractionModeBanner mode="voice" />
 
-      {/* Hauptbereich Mikrofon */}
-      <div className="mt-12 flex flex-col items-center text-center">
+      <div className="mt-10 flex flex-col items-center text-center">
         <MicrophoneCircle state={state} />
 
-        <h2 className="mt-8 text-[22px] font-bold text-[#101828]">
+        <h2 className="mt-7 text-[22px] font-bold text-[#101828]">
           {state === "recording"
-            ? "Aufnahme läuft..."
+            ? "Audioaufnahme läuft..."
             : state === "done"
-              ? "Text erkannt"
+              ? "Notiz bereit"
               : state === "unsupported"
                 ? "Browser nicht unterstützt"
-                : "Sprachaufnahme"}
+                : "Sprachnotiz"}
         </h2>
 
         <p className="mt-3 max-w-[320px] text-[15px] leading-[22px] text-[#475467]">
           {state === "recording"
-            ? "Sprich deutlich ins Mikrofon. Die App erkennt deine Beobachtung."
+            ? `Sprich jetzt. Aufnahmezeit: ${formatTime(recordingSeconds)}`
             : state === "done"
-              ? "Prüfe den erkannten Text, bevor du ihn speicherst."
-              : state === "unsupported"
-                ? errorMessage
-                : "Tippe auf Aufnahme starten oder sage später „Notiz starten“."}
+              ? "Prüfe Text und Audio, bevor du speicherst."
+              : "Starte die Aufnahme. Auch wenn das Transkript nicht perfekt ist, bleibt die Audioaufnahme erhalten."}
         </p>
       </div>
 
-      {/* Simulierte Lautstärke-Balken */}
       {state === "recording" && <AudioBars />}
 
-      {/* Erkannter Text */}
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
@@ -310,22 +380,58 @@ export default function Screen05Sprachnotiz({
             : "border-[#EAECF0] bg-white",
         ].join(" ")}
       >
-        <p className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#667085]">
-          Erkannter Text
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#667085]">
+            Notiztext
+          </p>
+
+          <div className="flex items-center gap-1 text-[12px] font-bold text-[#667085]">
+            <Edit3 size={14} />
+            editierbar
+          </div>
+        </div>
+
+        <p className="mt-3 rounded-2xl bg-[#F7F9FC] px-3 py-2 text-[12px] font-semibold text-[#667085]">
+          {transcriptStatus}
         </p>
 
-        <p className="mt-3 text-[16px] leading-6 text-[#344054]">
-          “{displayText}”
-        </p>
+        <textarea
+          value={noteText}
+          onChange={(event) => setNoteText(event.target.value)}
+          placeholder="Noch kein Text erkannt. Du kannst hier auch manuell schreiben."
+          className="mt-3 min-h-[120px] w-full resize-none rounded-2xl border border-[#EAECF0] bg-white px-4 py-3 text-[15px] leading-6 text-[#344054] outline-none focus:border-[#1D4ED8]"
+        />
 
         {interimText && (
-          <p className="mt-2 text-[12px] text-[#98A2B3]">
-            Vorläufiger Text wird noch aktualisiert...
+          <p className="mt-3 rounded-2xl bg-[#EEF4FF] px-3 py-2 text-[13px] font-semibold text-[#1D4ED8]">
+            Live: „{interimText}“
           </p>
         )}
       </motion.div>
 
-      {/* Hinweis Fehlerschutz */}
+      {audioUrl && (
+        <div className="mt-5 rounded-3xl border border-[#EAECF0] bg-white p-5 shadow-sm">
+          <p className="text-[12px] font-bold uppercase tracking-[0.12em] text-[#667085]">
+            Audioaufnahme
+          </p>
+
+          <audio controls src={audioUrl} className="mt-4 w-full" />
+
+          <p className="mt-3 text-[12px] leading-5 text-[#667085]">
+            Die Audioaufnahme bleibt als verlässliche Notiz erhalten, auch wenn
+            das automatische Transkript unvollständig ist.
+          </p>
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="mt-5 rounded-2xl border border-[#FEC84B] bg-[#FFFAEB] p-4">
+          <p className="text-[14px] font-semibold leading-5 text-[#B54708]">
+            {errorMessage}
+          </p>
+        </div>
+      )}
+
       <div className="mt-5 rounded-2xl border border-[#FEC84B] bg-[#FFFAEB] p-4">
         <p className="text-[14px] font-semibold leading-5 text-[#B54708]">
           Wichtig: Speichern erfordert eine zusätzliche Bestätigung, um
@@ -333,15 +439,14 @@ export default function Screen05Sprachnotiz({
         </p>
       </div>
 
-      {/* Buttons je nach Zustand */}
       <div className="mt-8 space-y-3">
-        {state === "idle" && (
+        {state !== "recording" && (
           <button
             onClick={startRecording}
             className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[#1D4ED8] text-[16px] font-bold text-white shadow-sm transition hover:brightness-95 active:scale-[0.99]"
           >
             <Mic size={20} />
-            Aufnahme starten
+            {state === "done" ? "Neue Aufnahme starten" : "Aufnahme starten"}
           </button>
         )}
 
@@ -350,29 +455,29 @@ export default function Screen05Sprachnotiz({
             onClick={stopRecording}
             className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[#EF4444] text-[16px] font-bold text-white shadow-sm transition hover:brightness-95 active:scale-[0.99]"
           >
-            <MicOff size={20} />
+            <Square size={20} />
             Aufnahme stoppen
           </button>
         )}
 
-        {state === "done" && (
-          <>
-            <button
-              onClick={saveNote}
-              className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[#1D4ED8] text-[16px] font-bold text-white shadow-sm transition hover:brightness-95 active:scale-[0.99]"
-            >
-              <Save size={20} />
-              Speichern
-            </button>
+        {state !== "recording" && (
+          <button
+            onClick={saveNote}
+            className="flex h-14 w-full items-center justify-center gap-2 rounded-2xl bg-[#1D4ED8] text-[16px] font-bold text-white shadow-sm transition hover:brightness-95 active:scale-[0.99]"
+          >
+            <Save size={20} />
+            Speichern
+          </button>
+        )}
 
-            <button
-              onClick={resetRecording}
-              className="flex h-[52px] w-full items-center justify-center gap-2 rounded-2xl bg-[#E8F0FE] text-[15px] font-bold text-[#1D4ED8] transition hover:bg-[#DCEBFF] active:scale-[0.99]"
-            >
-              <RefreshCcw size={18} />
-              Erneut diktieren
-            </button>
-          </>
+        {(state === "done" || noteText || audioUrl) && (
+          <button
+            onClick={resetRecording}
+            className="flex h-[52px] w-full items-center justify-center gap-2 rounded-2xl bg-[#E8F0FE] text-[15px] font-bold text-[#1D4ED8] transition hover:bg-[#DCEBFF] active:scale-[0.99]"
+          >
+            <RefreshCcw size={18} />
+            Zurücksetzen
+          </button>
         )}
 
         <button
@@ -387,14 +492,6 @@ export default function Screen05Sprachnotiz({
   );
 }
 
-/**
- * Animierter Mikrofon-Kreis.
- *
- * Dieser Kreis zeigt den Systemstatus sehr deutlich:
- * - blau = bereit
- * - rot = Aufnahme läuft
- * - grün = Text erkannt
- */
 function MicrophoneCircle({ state }: { state: RecordingState }) {
   const config = {
     idle: {
@@ -407,7 +504,7 @@ function MicrophoneCircle({ state }: { state: RecordingState }) {
       background: "bg-[#FEE2E2]",
       border: "border-[#EF4444]",
       text: "text-[#EF4444]",
-      icon: <Mic size={52} />,
+      icon: <MicOff size={52} />,
     },
     done: {
       background: "bg-[#D1FAE5]",
@@ -447,12 +544,6 @@ function MicrophoneCircle({ state }: { state: RecordingState }) {
   );
 }
 
-/**
- * Kleine animierte Audio-Balken.
- *
- * In dieser Version sind sie visuell simuliert.
- * Später können wir echte Lautstärke mit AudioContext verbinden.
- */
 function AudioBars() {
   return (
     <div className="mt-8 flex h-12 items-end justify-center gap-1">
@@ -472,4 +563,11 @@ function AudioBars() {
       ))}
     </div>
   );
+}
+
+function formatTime(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
 }
