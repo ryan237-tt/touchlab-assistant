@@ -1,37 +1,20 @@
+import type { ReactNode } from "react";
 import InteractionModeBanner from "./InteractionModeBanner";
-
 
 import {
   ChevronLeft,
   ChevronRight,
   FileText,
-  Headphones,
   MessageCircle,
   MoveRight,
   ShieldAlert,
 } from "lucide-react";
 import { motion } from "motion/react";
 
-/**
- * Props für Screen 03.
- *
- * onNavigate kommt aus App.tsx.
- * Damit kann dieser Screen:
- * - zurück zur Versuchsauswahl gehen
- * - zur Gestenerkennung gehen
- * - zur Sprachnotiz gehen
- */
 type Screen03AnleitungProps = {
   onNavigate: (screen: string) => void;
 };
 
-/**
- * Daten für den aktuellen Versuchsschritt.
- *
- * Warum als Objekt?
- * So können wir später Schritt 2, 3, 4 usw. hinzufügen,
- * ohne das Layout neu zu schreiben.
- */
 const currentStep = {
   experiment: "Titration",
   stepNumber: 1,
@@ -44,18 +27,6 @@ const currentStep = {
     "Lösung A ist ätzend. Immer Schutzhandschuhe und Brille tragen.",
 };
 
-/**
- * Screen 03: Anleitung Schritt 1
- *
- * HCI-Ziel:
- * Dieser Screen soll im Labor schnell verständlich sein.
- * Deshalb:
- * - wenig Text
- * - große Karten
- * - klare Warnung
- * - klare touchfreie Steuerung
- * - Feedback-orientierte Navigation
- */
 export default function Screen03Anleitung({
   onNavigate,
 }: Screen03AnleitungProps) {
@@ -63,8 +34,8 @@ export default function Screen03Anleitung({
     (currentStep.stepNumber / currentStep.totalSteps) * 100;
 
   return (
-    <section className="min-h-[932px] bg-[#F7F9FC] px-6 py-10">
-      {/* Header mit Zurück-Button und Titel */}
+    <section className="min-h-[932px] bg-[#F7F9FC] px-6 py-10 pb-36">
+      {/* Header */}
       <header className="flex items-start gap-4">
         <button
           onClick={() => onNavigate("02")}
@@ -133,12 +104,8 @@ export default function Screen03Anleitung({
           {currentStep.instruction}
         </p>
 
-        {/* Warnkarte */}
         <div className="mt-5 flex gap-3 rounded-2xl border border-[#FEC84B] bg-[#FFFAEB] p-4">
-          <ShieldAlert
-            size={22}
-            className="shrink-0 text-[#DC6803]"
-          />
+          <ShieldAlert size={22} className="shrink-0 text-[#DC6803]" />
 
           <p className="text-[14px] font-semibold leading-5 text-[#B54708]">
             {currentStep.warning}
@@ -167,13 +134,13 @@ export default function Screen03Anleitung({
 
           <GestureHint
             icon={<MessageCircle size={18} />}
-            title="„Notiz hinzufügen“ sagen"
+            title="„Notiz“ sagen"
             description="Sprachnotiz für Beobachtungen öffnen"
           />
         </div>
       </div>
 
-      {/* Aktionsbuttons unten */}
+      {/* Fallback-Buttons */}
       <div className="mt-8 grid grid-cols-[52px_1fr_1fr] gap-3">
         <button
           onClick={() => onNavigate("02")}
@@ -201,25 +168,19 @@ export default function Screen03Anleitung({
       </div>
 
       <p className="mt-6 text-center text-[12px] leading-5 text-[#667085]">
-        Status: bereit für Kopfbewegung oder Sprachbefehl.
+        Status: touchfreie Navigation über Kopfbewegung oder globale
+        Sprachbefehle.
       </p>
     </section>
   );
 }
 
-/**
- * Wiederverwendbare Komponente für Gesten-Hinweise.
- *
- * Warum?
- * Alle Gesten-Hinweise haben das gleiche Design.
- * So bleibt der Code sauber und konsistent.
- */
 function GestureHint({
   icon,
   title,
   description,
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   title: string;
   description: string;
 }) {
