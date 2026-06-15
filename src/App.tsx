@@ -7,10 +7,20 @@ import Screen05Sprachnotiz from "./components/Screen05Sprachnotiz";
 import Screen07Bestaetigung from "./components/Screen07Bestaetigung";
 import Screen06Sicherheitsinfo from "./components/Screen06Sicherheitsinfo";
 import ScreenTimer from "./components/ScreenTimer";
+import ScreenSlidesScanner from "./components/ScreenSlidesScanner";
 import GlobalTouchFreeDock from "./components/GlobalTouchFreeDock";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 
-type Screen = "01" | "02" | "03" | "04" | "05" | "06" | "07" | "timer";
+type Screen =
+  | "01"
+  | "02"
+  | "03"
+  | "04"
+  | "05"
+  | "06"
+  | "07"
+  | "timer"
+  | "slides";
 
 function App() {
   const [current, setCurrent] = useState<Screen>("01");
@@ -25,6 +35,7 @@ function App() {
       "06",
       "07",
       "timer",
+      "slides",
     ];
 
     if (validScreens.includes(screen as Screen)) {
@@ -61,7 +72,10 @@ function App() {
    * Kritische Bestätigung, keine globale Navigation.
    */
   const showTouchFreeDock =
-    current !== "04" && current !== "05" && current !== "07";
+    current !== "04" &&
+    current !== "05" &&
+    current !== "07" &&
+    current !== "slides";
 
   return (
     <main className="min-h-screen bg-[#F7F9FC] flex items-center justify-center p-4">
@@ -76,6 +90,7 @@ function App() {
         {current === "06" && <Screen06Sicherheitsinfo onNavigate={navigate} />}
         {current === "07" && <Screen07Bestaetigung onNavigate={navigate} />}
         {current === "timer" && <ScreenTimer onNavigate={navigate} />}
+        {current === "slides" && <ScreenSlidesScanner onNavigate={navigate} />}
 
         {showTouchFreeDock && (
           <GlobalTouchFreeDock current={current} onNavigate={navigate} />
