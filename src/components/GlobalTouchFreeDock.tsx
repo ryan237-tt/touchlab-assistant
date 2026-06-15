@@ -10,7 +10,7 @@ import {
 import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 import { useVoiceCommands } from "../hooks/useVoiceCommands";
 
-type Screen = "01" | "02" | "03" | "04" | "05" | "06" | "07" | "timer";
+type Screen = "01" | "02" | "03" | "04" | "05" | "06" | "07" | "timer" | "slides";
 
 type GlobalTouchFreeDockProps = {
   current: Screen;
@@ -379,7 +379,7 @@ export default function GlobalTouchFreeDock({
     (listening ? "Hört aktiv zu" : "Stimme aus");
 
   return (
-    <div className="absolute bottom-4 left-1/2 z-50 w-[calc(100%-32px)] max-w-[398px] -translate-x-1/2 rounded-3xl border border-[#D0D5DD] bg-white/95 p-3 shadow-2xl backdrop-blur">
+    <div className="absolute bottom-1 left-1/2 z-50 w-[calc(100%-32px)] max-w-[398px] -translate-x-1/2 rounded-3xl border border-[#D0D5DD] bg-white/90 p-2 shadow-2xl backdrop-blur">
       <video
         ref={videoRef}
         muted

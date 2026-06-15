@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 
-type Screen = "01" | "02" | "03" | "04" | "05" | "06" | "07" | "timer";
+type Screen = "01" | "02" | "03" | "04" | "05" | "06" | "07" | "timer" | "slides";
 
 type UseKeyboardShortcutsOptions = {
   current: Screen;
